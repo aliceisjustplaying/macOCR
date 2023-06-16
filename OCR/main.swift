@@ -8,57 +8,37 @@
 import Vision
 import Cocoa
 
-var MODE = VNRequestTextRecognitionLevel.accurate // or .fast
-var USE_LANG_CORRECTION = false
-var REVISION:Int
-if #available(macOS 11, *) {
-    REVISION = VNRecognizeTextRequestRevision2
-} else {
-    REVISION = VNRecognizeTextRequestRevision1
-}
-
+var MODE = VNRequestTextRecognitionLevel.accurate
+var USE_LANG_CORRECTION = true
+var REVISION  = VNRecognizeTextRequestRevision3
 func main(args: [String]) -> Int32 {
+    let language = "en-US"
+    var languages:[String] = []
+    languages.append(language)
+    let url = URL(fileURLWithPath: args[1])
+    var files = [URL]()
+    if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+        for case let fileURL as URL in enumerator {
+            do {
+                let fileAttributes = try fileURL.resourceValues(forKeys:[.isRegularFileKey])
+                if fileAttributes.isRegularFile! && fileURL.pathExtension.lowercased().range(of: "(jpe?g|png|heic)$", options: .regularExpression) != nil {
+                    files.append(fileURL)
+                }
+            } catch { print(error, fileURL) }
+        }
+        //        print(files)
+    }
     
-    if CommandLine.arguments.count == 2 {
-        if args[1] == "--langs" {
-            let request = VNRecognizeTextRequest.init()
-            request.revision = REVISION
-            request.recognitionLevel = VNRequestTextRecognitionLevel.accurate
-            let langs = try? request.supportedRecognitionLanguages()
-            for lang in langs! {
-                print(lang)
-            }
-        }
-        return 0
-    }else if CommandLine.arguments.count == 6 {
-        let (language, fastmode, languageCorrection, src, dst) = (args[1], args[2],args[3],args[4],args[5])
-        let substrings = language.split(separator: ",")
-        var languages:[String] = []
-        for substring in substrings {
-            languages.append(String(substring))
-        }
-        if fastmode == "true" {
-            MODE = VNRequestTextRecognitionLevel.fast
-        }else{
-            MODE = VNRequestTextRecognitionLevel.accurate
-        }
-        
-        if languageCorrection == "true" {
-            USE_LANG_CORRECTION = true
-        }else{
-            USE_LANG_CORRECTION = false
-        }
-
-        guard let img = NSImage(byReferencingFile: src) else {
-            fputs("Error: failed to load image '\(src)'\n", stderr)
+    for file in files {
+        guard let img = NSImage(byReferencing: file) as NSImage? else {
+            fputs("Error: failed to load image '\(file)'\n", stderr)
             return 1
         }
         guard let imgRef = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            fputs("Error: failed to convert NSImage to CGImage for '\(src)'\n", stderr)
+            fputs("Error: failed to convert NSImage to CGImage for '\(file)'\n", stderr)
             return 1
         }
-
-
+        
         let request = VNRecognizeTextRequest { (request, error) in
             let observations = request.results as? [VNRecognizedTextObservation] ?? []
             var dict:[String:Any] = [:]
@@ -81,7 +61,7 @@ func main(args: [String]) -> Int32 {
                 let rect = VNImageRectForNormalizedRect(boundingBox,
                                                         Int(imgRef.width),
                                                         Int(imgRef.height))
-
+                
                 line["text"] = string ?? ""
                 line["confidence"] = confidence ?? ""
                 line["x"] = Int(rect.minX)
@@ -92,15 +72,20 @@ func main(args: [String]) -> Int32 {
                 allText = allText + (string ?? "")
                 index = index + 1
                 if index != observations.count {
-                   allText = allText + "\n"
+                    allText = allText + "\n"
                 }
             }
             dict["lines"] = lines
             dict["text"] = allText
             let data = try? JSONSerialization.data(withJSONObject: dict, options: [])
-            let jsonString = String(data: data!,
-                                    encoding: .utf8) ?? "[]"
-            try? jsonString.write(to: URL(fileURLWithPath: dst), atomically: true, encoding: String.Encoding.utf8)
+            let jsonString = String(data: data!, encoding: .utf8) ?? "[]"
+            let dstFile = file.absoluteString + ".json"
+            do {
+                try jsonString.write(to: URL(string: dstFile)!, atomically: true, encoding: String.Encoding.utf8)
+            } catch {
+                print("Unexpected error writing JSON: \(error).")
+                exit(1)
+            }
         }
         request.recognitionLevel = MODE
         request.usesLanguageCorrection = USE_LANG_CORRECTION
@@ -108,22 +93,15 @@ func main(args: [String]) -> Int32 {
         request.recognitionLanguages = languages
         //request.minimumTextHeight = 0
         //request.customWords = [String]
-        try? VNImageRequestHandler(cgImage: imgRef, options: [:]).perform([request])
-
-        return 0
-    }else{
-        print("""
-              usage:
-                language fastmode languageCorrection image_path output_path
-                --langs: list suppported languages
-              
-              example:
-                macOCR en false true ./image.jpg out.json
-              """)
-        return 1
+        do {
+            try VNImageRequestHandler(cgImage: imgRef, options: [:]).perform([request])
+        } catch {
+            print("Unexpected error with OCR: \(error).")
+            exit(1)
+        }
+        print("\(file) done")
     }
+    return 0
 }
-
-
 
 exit(main(args: CommandLine.arguments))
