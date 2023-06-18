@@ -12,9 +12,7 @@ var MODE = VNRequestTextRecognitionLevel.accurate
 var USE_LANG_CORRECTION = true
 var REVISION  = VNRecognizeTextRequestRevision3
 func main(args: [String]) -> Int32 {
-    let language = "en-US"
-    var languages:[String] = []
-    languages.append(language)
+    let languages:[String] = ["en-US"]
     let url = URL(fileURLWithPath: args[1])
     var files = [URL]()
     if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
@@ -38,14 +36,13 @@ func main(args: [String]) -> Int32 {
             fputs("Error: failed to convert NSImage to CGImage for '\(file)'\n", stderr)
             return 1
         }
-        
+
         let request = VNRecognizeTextRequest { (request, error) in
             let observations = request.results as? [VNRecognizedTextObservation] ?? []
             var dict:[String:Any] = [:]
             var lines:[Any] = []
             var allText = ""
-            var index = 0
-            for observation in observations {
+            for (index, observation) in observations.enumerated() {
                 // Find the top observation.
                 var line:[String:Any] = [:]
                 let candidate = observation.topCandidates(1).first
@@ -70,7 +67,6 @@ func main(args: [String]) -> Int32 {
                 line["height"] = Int(rect.size.height)
                 lines.append(line)
                 allText = allText + (string ?? "")
-                index = index + 1
                 if index != observations.count {
                     allText = allText + "\n"
                 }
